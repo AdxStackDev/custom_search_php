@@ -47,20 +47,8 @@ The script’s logic flows as follows:
 
 ### Search Request Lifecycle
 
-```mermaid
-flowchart TD
-    A[Client Sends POST Request] --> B[Validate api_key and cx]
-    B -- Missing --> C[Return 400 Error]
-    B -- Present --> D[Prepare Search Parameters]
-    D --> E[For Each Keyword]
-    E --> F[Build Query and API Params]
-    F --> G[Call Custom Search API]
-    G --> H[Parse and Store Results]
-    H --> I[Sleep 120ms (Throttle)]
-    I --> E
-    E -- All Keywords Processed --> J[Store Results in Session]
-    J --> K[Return JSON Results to Client]
-```
+![Request Lifecycle](https://github.com/AdxStackDev/custom_search_php/blob/main/mermaid-diagram.png)
+
 
 ---
 
