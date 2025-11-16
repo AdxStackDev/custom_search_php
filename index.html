@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Adx Search (split frontend)</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    /* small fallback styles to keep layout usable even without Tailwind */
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; margin:0; padding:20px; background:#f8fafc; color:#111827; }
+    .container { max-width: 900px; margin: 0 auto; }
+    .row { display:flex; gap:12px; align-items:center; margin-bottom:8px; }
+    label { min-width:90px; font-size:0.9rem; color:#374151; }
+    input[type="text"], textarea, select { flex:1; padding:8px 10px; border:1px solid #d1d5db; border-radius:6px; }
+    button { padding:8px 12px; border-radius:6px; cursor:pointer; background:#111827; color:white; border: none; }
+    .result { padding:12px; border-radius:8px; background:white; margin-bottom:10px; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+    .meta { font-size:0.85rem; color:#6b7280; }
+    .grid { display:grid; grid-template-columns:1fr 240px; gap:16px; align-items:start; }
+    .controls { background:#fff; padding:12px; border-radius:8px; box-shadow: 0 1px 2px rgba(0,0,0,0.03); }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔍 Adx Search (split)</h1>
+
+    <div class="grid">
+      <div>
+        <form id="searchForm">
+          <div class="row"><label>API Key</label><input name="api_key" required placeholder="Google API Key"></div>
+          <div class="row"><label>CX (CSE ID)</label><input name="cx" required placeholder="Custom Search Engine ID"></div>
+
+          <div class="row"><label>Keywords</label><input name="keywords" placeholder="term1,term2 or one per line"></div>
+          <div class="row"><label>In Title</label><input name="intitle"></div>
+          <div class="row"><label>In URL</label><input name="inurl"></div>
+          <div class="row"><label>In Text</label><input name="intext"></div>
+
+          <div class="row"><label>Filetype</label><input name="filetype" placeholder="pdf,docx..."></div>
+          <div class="row"><label>Safe</label>
+            <select name="safe">
+              <option value="off">off</option>
+              <option value="medium">medium</option>
+              <option value="high">high</option>
+            </select>
+          </div>
+
+          <div style="display:flex; gap:8px; margin-top:8px;">
+            <button type="submit">Search</button>
+            <button type="button" id="exportCsv">Export CSV</button>
+            <button type="button" id="exportJson">Export JSON</button>
+          </div>
+        </form>
+
+        <h2 style="margin-top:20px;">Results</h2>
+        <div id="results"></div>
+      </div>
+
+      <aside class="controls">
+        <div class="meta">Tip: fill API Key &amp; CX then press Search. Exports download results from the last search.</div>
+        <hr style="margin:10px 0" />
+        <div><strong>Last query preview</strong></div>
+        <pre id="queryPreview" style="white-space:pre-wrap; font-size:0.9rem; margin-top:8px; background:#f1f5f9; padding:8px; border-radius:6px;"></pre>
+      </aside>
+    </div>
+  </div>
+
+<script>
+function qs(name) { return document.querySelector('[name="'+name+'"]').value; }
+
+function formToData() {
+  const names = ['api_key','cx','keywords','intitle','inurl','intext','filetype','exact','exclude','orTerms','hq','site','site_exclude','after','before','aroundA','aroundB','aroundN','safe','gl','lr','hl','searchType','num','page'];
+  const data = {};
+  names.forEach(n=> {
+    const el = document.querySelector('[name="'+n+'"]');
+    if (!el) return;
+    data[n] = el.value;
+  });
+  // sensible defaults
+  if (!data.num) data.num = 10;
+  if (!data.page) data.page = 1;
+  return data;
+}
+
+function previewQuery() {
+  // minimal preview: show keywords + intitle/inurl pieces
+  const d = formToData();
+  let parts = [];
+  if (d.keywords) parts.push(d.keywords);
+  if (d.intitle) parts.push('intitle:"'+d.intitle+'"');
+  if (d.inurl) parts.push('inurl:"'+d.inurl+'"');
+  if (d.intext) parts.push('intext:"'+d.intext+'"');
+  document.getElementById('queryPreview').textContent = parts.join(' ');
+}
+
+document.getElementById('searchForm').addEventListener('input', previewQuery);
+previewQuery();
+
+document.getElementById('searchForm').addEventListener('submit', async function(ev){
+  ev.preventDefault();
+  const btn = ev.target.querySelector('button[type="submit"]');
+  btn.disabled = true;
+  btn.textContent = 'Searching...';
+
+  const data = formToData();
+  try {
+    const resp = await fetch('api.php', {
+      method: 'POST',
+      headers: {'Content-Type':'application/x-www-form-urlencoded'},
+      body: new URLSearchParams(data)
+    });
+    const j = await resp.json();
+    if (j.error) {
+      document.getElementById('results').innerHTML = '<div style="color:crimson;">Error: '+j.error+'</div>';
+    } else {
+      renderResults(j.results || {});
+    }
+  } catch (err) {
+    document.getElementById('results').innerHTML = '<div style="color:crimson;">Network error. See console.</div>';
+    console.error(err);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Search';
+  }
+});
+
+function renderResults(results) {
+  const el = document.getElementById('results');
+  el.innerHTML = '';
+  for (const q in results) {
+    const group = results[q];
+    const h = document.createElement('div');
+    h.innerHTML = `<h3 style="font-size:1rem; margin:10px 0;">Query: <code>${escapeHtml(q)}</code> — ${group.length} items</h3>`;
+    el.appendChild(h);
+    group.forEach(item => {
+      const r = document.createElement('div');
+      r.className = 'result';
+      r.innerHTML = `
+        <div style="font-weight:600;"><a href="${escapeAttr(item.link || '#')}" target="_blank" rel="noopener">${escapeHtml(item.title || item.link || 'No title')}</a></div>
+        <div class="meta">${escapeHtml(item.displayLink || '')}</div>
+        <p style="margin-top:6px;">${escapeHtml(item.snippet || '')}</p>
+      `;
+      el.appendChild(r);
+    });
+  }
+}
+
+function escapeHtml(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function escapeAttr(s) { return (s||'').replace(/"/g,'&quot;'); }
+
+// Exports: they trigger download of last saved results in session via api.php?export=...
+document.getElementById('exportCsv').addEventListener('click', ()=> window.location.href = 'api.php?export=csv');
+document.getElementById('exportJson').addEventListener('click', ()=> window.location.href = 'api.php?export=json');
+
+</script>
+</body>
+</html>
